@@ -1,0 +1,34 @@
+# Claude
+CLAUDE.md
+.claude/
+
+# SQLite / SQL
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# User config
+priority_contacts.txt
