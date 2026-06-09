@@ -1,0 +1,111 @@
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+
+
+@contextmanager
+def get_connection(db_path: str) -> Iterator[sqlite3.Connection]:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _lookback_cutoff(hours: int) -> str:
+    """Return an ISO 8601 UTC string for `hours` ago, for use with datetime() in SQLite."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    return cutoff.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def fetch_messages_by_time_window(
+    db_path: str,
+    lookback_hours: int,
+) -> list[dict]:
+    """Return all messages within the last `lookback_hours`.
+
+    Each row is a dict with: chat_jid, chat_name, sender, content, timestamp, is_from_me.
+    """
+    cutoff = _lookback_cutoff(lookback_hours)
+    query = """
+        SELECT
+            m.chat_jid   AS chat_jid,
+            c.name       AS chat_name,
+            m.is_from_me AS is_from_me,
+            m.sender     AS sender,
+            m.content    AS content,
+            m.timestamp  AS timestamp
+        FROM messages m
+        LEFT JOIN chats c ON c.jid = m.chat_jid
+        WHERE datetime(m.timestamp) >= ?
+        ORDER BY m.timestamp ASC
+    """
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, (cutoff,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def fetch_messages_by_contact(
+    db_path: str,
+    contact_jid: str,
+    lookback_hours: int,
+) -> list[dict]:
+    """Return messages for a specific contact within the last `lookback_hours`.
+
+    `contact_jid` is the WhatsApp JID, e.g. '6512345678@s.whatsapp.net'.
+    """
+    cutoff = _lookback_cutoff(lookback_hours)
+    query = """
+        SELECT
+            m.chat_jid   AS chat_jid,
+            c.name       AS chat_name,
+            m.is_from_me AS is_from_me,
+            m.sender     AS sender,
+            m.content    AS content,
+            m.timestamp  AS timestamp
+        FROM messages m
+        LEFT JOIN chats c ON c.jid = m.chat_jid
+        WHERE m.chat_jid = ?
+          AND datetime(m.timestamp) >= ?
+        ORDER BY m.timestamp ASC
+    """
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, (contact_jid, cutoff)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def fetch_individual_chats_with_last_message(
+    db_path: str,
+    lookback_hours: int,
+) -> list[dict]:
+    """Return one row per individual (non-group) chat, showing only the latest message.
+
+    Filters to chats that had activity within `lookback_hours`.
+    """
+    cutoff = _lookback_cutoff(lookback_hours)
+    query = """
+        SELECT
+            m.chat_jid   AS chat_jid,
+            c.name       AS chat_name,
+            m.is_from_me AS is_from_me,
+            m.sender     AS sender,
+            m.content    AS content,
+            m.timestamp  AS timestamp
+        FROM messages m
+        LEFT JOIN chats c ON c.jid = m.chat_jid
+        INNER JOIN (
+            SELECT chat_jid, MAX(timestamp) AS max_ts
+            FROM messages
+            WHERE datetime(timestamp) >= ?
+              AND chat_jid NOT LIKE '%@g.us'
+            GROUP BY chat_jid
+        ) latest
+          ON m.chat_jid = latest.chat_jid
+         AND m.timestamp = latest.max_ts
+        ORDER BY m.timestamp DESC
+    """
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, (cutoff,)).fetchall()
+    return [dict(row) for row in rows]
