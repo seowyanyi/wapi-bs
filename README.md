@@ -1,18 +1,12 @@
-# WhatsApp Intelligence Briefing
+# WhatsApp Chat Summary Bot
 
-A personal AI briefing agent that reads your WhatsApp message history, runs it through Claude, and pushes a structured daily digest to Telegram.
+A personal AI agent that reads your WhatsApp message history, runs it through Claude, and pushes a daily chat summary to Telegram.
 
 ---
 
 ## What It Does
 
-Every run produces a Telegram briefing with three sections:
-
-| Module | What it does |
-|---|---|
-| **Chat Summary** | Summarises active group and individual chats from the last 24–48 hours. Flags anything needing attention. |
-| **Unreplied Messages** | Finds individual chats where the last message is inbound and unanswered. LLM classifies urgency: high / medium / low. |
-| **Priority Contact Monitoring** | Monitors a user-defined contact list against stated priorities. Assesses sentiment trend and recommends action. Config-driven via a plain text file. |
+Every run produces a Telegram message summarising your active group and individual chats from the last 24 hours, with anything needing attention flagged.
 
 ---
 
@@ -29,11 +23,8 @@ WhatsApp ──► whatsapp-mcp (local Go bridge)
          │  db/reader.py  │  — time-windowed SQLite queries
          └───────┬────────┘
                  │
-    ┌────────────┼────────────┐
-    ▼            ▼            ▼
-chat_summary  unreplied  priority_contact
-    │            │            │
-    └────────────┴────────────┘
+                 ▼
+          chat_summary
                  │
           llm/client.py  — Anthropic Claude API
                  │
@@ -42,7 +33,6 @@ chat_summary  unreplied  priority_contact
 ```
 
 **Key design choices:**
-- Each briefing module is fully independent — runs and fails in isolation
 - SQLite is queried directly; no message data leaves the machine until Claude processes it
 - Delivery handles Telegram's 4096-char limit by auto-chunking long messages
 - Secrets in `.env`, never hardcoded
@@ -78,14 +68,11 @@ The [whatsapp-mcp](https://github.com/verygoodplugins/whatsapp-mcp) server was m
 The whatsapp-mcp Go bridge binds to loopback only (`127.0.0.1`) — its REST API is not reachable from the network. `messages.db` is queried directly via SQLite on-device. Personal message data only leaves the machine at the moment it is sent to the Anthropic API, and only for that specific analysis window.
 
 **Data minimization**
-Each module sends the bare minimum to the LLM:
 - All queries are time-windowed (`LOOKBACK_HOURS`) — not your full message history
-- Unreplied Messages only pulls the *last message per chat*, not full threads
-- Priority Contact Monitoring only fetches messages from the contacts explicitly listed in your config
-- Nothing is persisted after a run — the Telegram briefing is the only output
+- Nothing is persisted after a run — the Telegram message is the only output
 
 **Secrets never committed**
-`.env`, `*.db`, and `priority_contacts.txt` are all covered by `.gitignore`. `.env.example` ships with placeholders only.
+`.env` and `*.db` are covered by `.gitignore`. `.env.example` ships with placeholders only.
 
 **Locked delivery target**
 Telegram output is scoped to a single `CHAT_ID` environment variable. The briefing cannot be forwarded or broadcast to other destinations.
@@ -100,8 +87,6 @@ Telegram output is scoped to a single `CHAT_ID` environment variable. The briefi
 | Telegram delivery (`delivery/telegram.py`) | Done |
 | LLM client (`llm/client.py`) | Done |
 | Chat Summary module | In progress |
-| Unreplied Messages module | In progress |
-| Priority Contact Monitoring module | In progress |
 | Cron scheduling (n8n) | Planned |
 
 ---
@@ -135,16 +120,6 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 ANTHROPIC_API_KEY=your_api_key
 LOOKBACK_HOURS=48
-PRIORITY_CONFIG_PATH=priority_contacts.txt
-```
-
-### Priority Contacts
-
-Create `priority_contacts.txt` — one entry per line:
-
-```
-6512345678@s.whatsapp.net | Follow up on project proposal
-6598765432@s.whatsapp.net | Monitor sentiment re: contract renewal
 ```
 
 ### Run
