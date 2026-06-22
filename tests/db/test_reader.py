@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import src.db.reader
 from src.db.reader import (
     _lookback_cutoff,
     fetch_individual_chats_with_last_message,
@@ -72,12 +73,13 @@ def seed(db_path: str, rows: list[dict]) -> None:
 
 
 @pytest.fixture
-def db_path(tmp_path):
+def db_path(tmp_path, monkeypatch):
     path = str(tmp_path / "test.db")
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
+    monkeypatch.setattr(src.db.reader, "DB_PATH", path)
     return path
 
 
@@ -106,7 +108,7 @@ def test_time_window_includes_recent_messages(db_path):
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 0, "content": "recent", "timestamp": ts(1)},
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 0, "content": "old", "timestamp": ts(30)},
     ])
-    results = fetch_messages_by_time_window(db_path, lookback_hours=24)
+    results = fetch_messages_by_time_window(lookback_hours=24)
     contents = [r["content"] for r in results]
     assert "recent" in contents
     assert "old" not in contents
@@ -118,7 +120,7 @@ def test_time_window_includes_both_dms_and_groups(db_path):
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 0, "content": "dm", "timestamp": ts(1)},
         {"chat_jid": "group@g.us", "chat_name": "Work Group", "is_from_me": 0, "content": "group", "timestamp": ts(1)},
     ])
-    results = fetch_messages_by_time_window(db_path, lookback_hours=24)
+    results = fetch_messages_by_time_window(lookback_hours=24)
     jids = {r["chat_jid"] for r in results}
     assert "alice@s.whatsapp.net" in jids
     assert "group@g.us" in jids
@@ -133,7 +135,7 @@ def test_fetch_by_contact_scopes_to_correct_jid(db_path):
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 0, "content": "from alice", "timestamp": ts(1)},
         {"chat_jid": "bob@s.whatsapp.net", "is_from_me": 0, "content": "from bob", "timestamp": ts(1)},
     ])
-    results = fetch_messages_by_contact(db_path, "alice@s.whatsapp.net", lookback_hours=24)
+    results = fetch_messages_by_contact("alice@s.whatsapp.net", lookback_hours=24)
     assert len(results) == 1
     assert results[0]["content"] == "from alice"
 
@@ -143,7 +145,7 @@ def test_fetch_by_contact_respects_time_window(db_path):
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 0, "content": "recent", "timestamp": ts(1)},
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 0, "content": "old", "timestamp": ts(30)},
     ])
-    results = fetch_messages_by_contact(db_path, "alice@s.whatsapp.net", lookback_hours=24)
+    results = fetch_messages_by_contact("alice@s.whatsapp.net", lookback_hours=24)
     contents = [r["content"] for r in results]
     assert "recent" in contents
     assert "old" not in contents
@@ -158,7 +160,7 @@ def test_individual_chats_excludes_group_chats(db_path):
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 0, "content": "dm", "timestamp": ts(1)},
         {"chat_jid": "group@g.us", "chat_name": "Work Group", "is_from_me": 0, "content": "group msg", "timestamp": ts(1)},
     ])
-    results = fetch_individual_chats_with_last_message(db_path, lookback_hours=24)
+    results = fetch_individual_chats_with_last_message(lookback_hours=24)
     jids = [r["chat_jid"] for r in results]
     assert "alice@s.whatsapp.net" in jids
     assert "group@g.us" not in jids
@@ -170,7 +172,7 @@ def test_individual_chats_returns_only_latest_message_per_chat(db_path):
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 1, "content": "my reply", "timestamp": ts(3)},
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 0, "content": "latest from alice", "timestamp": ts(1)},
     ])
-    results = fetch_individual_chats_with_last_message(db_path, lookback_hours=24)
+    results = fetch_individual_chats_with_last_message(lookback_hours=24)
     assert len(results) == 1
     assert results[0]["content"] == "latest from alice"
     assert results[0]["is_from_me"] == 0
@@ -182,7 +184,7 @@ def test_individual_chats_returns_one_row_per_chat(db_path):
         {"chat_jid": "alice@s.whatsapp.net", "is_from_me": 1, "content": "hey", "timestamp": ts(1)},
         {"chat_jid": "bob@s.whatsapp.net", "is_from_me": 0, "content": "yo", "timestamp": ts(1)},
     ])
-    results = fetch_individual_chats_with_last_message(db_path, lookback_hours=24)
+    results = fetch_individual_chats_with_last_message(lookback_hours=24)
     jids = [r["chat_jid"] for r in results]
     assert len(jids) == 2
     assert len(set(jids)) == 2  # no duplicates

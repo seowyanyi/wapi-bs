@@ -1,27 +1,10 @@
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-
-@contextmanager
-def get_connection(db_path: str) -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-def _lookback_cutoff(hours: int) -> str:
-    """Return an ISO 8601 UTC string for `hours` ago, for use with datetime() in SQLite."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    return cutoff.strftime("%Y-%m-%d %H:%M:%S")
-
-
 def fetch_messages_by_time_window(
-    db_path: str,
     lookback_hours: int,
 ) -> list[dict]:
     """Return all messages within the last `lookback_hours`.
@@ -42,13 +25,12 @@ def fetch_messages_by_time_window(
         WHERE datetime(m.timestamp) >= ?
         ORDER BY m.timestamp ASC
     """
-    with get_connection(db_path) as conn:
+    with get_connection() as conn:
         rows = conn.execute(query, (cutoff,)).fetchall()
     return [dict(row) for row in rows]
 
 
 def fetch_messages_by_contact(
-    db_path: str,
     contact_jid: str,
     lookback_hours: int,
 ) -> list[dict]:
@@ -71,13 +53,12 @@ def fetch_messages_by_contact(
           AND datetime(m.timestamp) >= ?
         ORDER BY m.timestamp ASC
     """
-    with get_connection(db_path) as conn:
+    with get_connection() as conn:
         rows = conn.execute(query, (contact_jid, cutoff)).fetchall()
     return [dict(row) for row in rows]
 
 
 def fetch_individual_chats_with_last_message(
-    db_path: str,
     lookback_hours: int,
 ) -> list[dict]:
     """Return one row per individual (non-group) chat, showing only the latest message.
@@ -106,6 +87,21 @@ def fetch_individual_chats_with_last_message(
          AND m.timestamp = latest.max_ts
         ORDER BY m.timestamp DESC
     """
-    with get_connection(db_path) as conn:
+    with get_connection() as conn:
         rows = conn.execute(query, (cutoff,)).fetchall()
     return [dict(row) for row in rows]
+
+@contextmanager
+def get_connection(db_path: str | None = None) -> Iterator[sqlite3.Connection]:
+    conn = sqlite3.connect(db_path or os.getenv("DB_PATH", ""))
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _lookback_cutoff(hours: int) -> str:
+    """Return an ISO 8601 UTC string for `hours` ago, for use with datetime() in SQLite."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    return cutoff.strftime("%Y-%m-%d %H:%M:%S")
