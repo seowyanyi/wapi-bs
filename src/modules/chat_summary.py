@@ -15,7 +15,6 @@ def run(lookback_hours: int) -> str:
     """
     # get chat messages
     excluded_chats = load_excluded_chats()
-    print(f"Excluding chats: {excluded_chats}")
-    chat_messages = fetch_messages_by_time_window(lookback_hours, excluded_chats=excluded_chats)
+    chat_messages = fetch_messages_by_time_window(lookback_hours, excluded_chats)
     return chat_messages
     # pass into call model and ask it to summarise
