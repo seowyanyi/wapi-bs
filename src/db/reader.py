@@ -4,12 +4,30 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+def load_excluded_chats(path: str | None = None) -> list[str]:
+    """Load chat JIDs to exclude, one per line, from a text file.
+
+    Reads from `path` if given, otherwise falls back to EXCLUDED_CHATS_PATH env var.
+    Returns an empty list if the file is missing or the path is unset.
+    """
+    resolved = path or os.getenv("EXCLUDED_CHATS_PATH", "")
+    if not resolved:
+        return []
+    try:
+        with open(resolved) as f:
+            return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+    except FileNotFoundError:
+        return []
+
+
 def fetch_messages_by_time_window(
     lookback_hours: int,
+    excluded_chats: list[str] | None = None,
 ) -> list[dict]:
     """Return all messages within the last `lookback_hours`.
 
     Each row is a dict with: chat_jid, chat_name, sender, content, timestamp, is_from_me.
+    Chats listed in `excluded_chats` (by JID) are omitted.
     """
     cutoff = _lookback_cutoff(lookback_hours)
     query = """
@@ -27,7 +45,10 @@ def fetch_messages_by_time_window(
     """
     with get_connection() as conn:
         rows = conn.execute(query, (cutoff,)).fetchall()
-    return [dict(row) for row in rows]
+    messages = [dict(row) for row in rows]
+    if excluded_chats:
+        messages = [m for m in messages if m["chat_jid"] not in excluded_chats]
+    return messages
 
 
 def fetch_messages_by_contact(
@@ -60,6 +81,7 @@ def fetch_messages_by_contact(
 
 def fetch_individual_chats_with_last_message(
     lookback_hours: int,
+    excluded_chats: list[str] | None = None,
 ) -> list[dict]:
     """Return one row per individual (non-group) chat, showing only the latest message.
 
@@ -89,7 +111,10 @@ def fetch_individual_chats_with_last_message(
     """
     with get_connection() as conn:
         rows = conn.execute(query, (cutoff,)).fetchall()
-    return [dict(row) for row in rows]
+    chats = [dict(row) for row in rows]
+    if excluded_chats:
+        chats = [c for c in chats if c["chat_jid"] not in excluded_chats]
+    return chats
 
 @contextmanager
 def get_connection(db_path: str | None = None) -> Iterator[sqlite3.Connection]:

@@ -10,6 +10,7 @@ from src.db.reader import (
     fetch_individual_chats_with_last_message,
     fetch_messages_by_contact,
     fetch_messages_by_time_window,
+    load_excluded_chats,
 )
 
 SCHEMA = """
@@ -79,7 +80,7 @@ def db_path(tmp_path, monkeypatch):
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
-    monkeypatch.setattr(src.db.reader, "DB_PATH", path)
+    monkeypatch.setenv("DB_PATH", path)
     return path
 
 
@@ -188,3 +189,145 @@ def test_individual_chats_returns_one_row_per_chat(db_path):
     jids = [r["chat_jid"] for r in results]
     assert len(jids) == 2
     assert len(set(jids)) == 2  # no duplicates
+
+
+# ---------------------------------------------------------------------------
+# load_excluded_chats
+# ---------------------------------------------------------------------------
+
+def test_load_excluded_chats_returns_empty_with_no_config(monkeypatch):
+    monkeypatch.delenv("EXCLUDED_CHATS_PATH", raising=False)
+    assert load_excluded_chats() == []
+
+
+def test_load_excluded_chats_returns_empty_when_file_missing(monkeypatch):
+    monkeypatch.setenv("EXCLUDED_CHATS_PATH", "/nonexistent/excluded_chats.txt")
+    assert load_excluded_chats() == []
+
+
+def test_load_excluded_chats_parses_jids(tmp_path):
+    f = tmp_path / "excluded.txt"
+    f.write_text("111111111111111111@g.us\n222222222222222222@g.us\n")
+    result = load_excluded_chats(str(f))
+    assert result == ["111111111111111111@g.us", "222222222222222222@g.us"]
+
+
+def test_load_excluded_chats_skips_comments_and_blank_lines(tmp_path):
+    f = tmp_path / "excluded.txt"
+    f.write_text("# this is a comment\n\n111111111111111111@g.us\n\n# another comment\n")
+    result = load_excluded_chats(str(f))
+    assert result == ["111111111111111111@g.us"]
+
+
+def test_load_excluded_chats_reads_from_env_var(tmp_path, monkeypatch):
+    f = tmp_path / "excluded.txt"
+    f.write_text("111111111111111111@g.us\n")
+    monkeypatch.setenv("EXCLUDED_CHATS_PATH", str(f))
+    assert load_excluded_chats() == ["111111111111111111@g.us"]
+
+
+def test_load_excluded_chats_path_arg_overrides_env_var(tmp_path, monkeypatch):
+    env_file = tmp_path / "from_env.txt"
+    env_file.write_text("333333333333333333@g.us\n")
+    arg_file = tmp_path / "from_arg.txt"
+    arg_file.write_text("111111111111111111@g.us\n")
+    monkeypatch.setenv("EXCLUDED_CHATS_PATH", str(env_file))
+    assert load_excluded_chats(str(arg_file)) == ["111111111111111111@g.us"]
+
+
+# ---------------------------------------------------------------------------
+# fetch_messages_by_time_window — exclusion filtering
+# ---------------------------------------------------------------------------
+
+def test_time_window_excluded_chat_messages_are_removed(db_path):
+    seed(db_path, [
+        {"chat_jid": "111111111111111111@g.us", "chat_name": "Project Alpha",
+         "is_from_me": 1, "sender": "6590000001", "content": "draft ready for review", "timestamp": ts(1)},
+        {"chat_jid": "111111111111111111@g.us", "chat_name": "Project Alpha",
+         "is_from_me": 0, "sender": "6590000002", "content": "looks good", "timestamp": ts(1)},
+        {"chat_jid": "222222222222222222@g.us", "chat_name": "Weekly Standup",
+         "is_from_me": 1, "sender": "6590000001", "content": "meeting at 10am", "timestamp": ts(1)},
+    ])
+    results = fetch_messages_by_time_window(lookback_hours=24, excluded_chats=["111111111111111111@g.us"])
+    jids = {r["chat_jid"] for r in results}
+    assert "111111111111111111@g.us" not in jids
+    assert "222222222222222222@g.us" in jids
+
+
+def test_time_window_all_messages_from_excluded_chat_are_removed(db_path):
+    # Excluded chat has multiple messages — every one should be gone
+    seed(db_path, [
+        {"chat_jid": "111111111111111111@g.us", "chat_name": "Project Alpha",
+         "is_from_me": 1, "sender": "6590000001", "content": "first message", "timestamp": ts(3)},
+        {"chat_jid": "111111111111111111@g.us", "chat_name": "Project Alpha",
+         "is_from_me": 0, "sender": "6590000002", "content": "second message", "timestamp": ts(2)},
+        {"chat_jid": "111111111111111111@g.us", "chat_name": "Project Alpha",
+         "is_from_me": 1, "sender": "6590000001", "content": "third message", "timestamp": ts(1)},
+    ])
+    results = fetch_messages_by_time_window(lookback_hours=24, excluded_chats=["111111111111111111@g.us"])
+    assert results == []
+
+
+def test_time_window_multiple_chats_excluded(db_path):
+    seed(db_path, [
+        {"chat_jid": "111111111111111111@g.us", "chat_name": "Project Alpha",
+         "is_from_me": 1, "sender": "6590000001", "content": "msg1", "timestamp": ts(1)},
+        {"chat_jid": "222222222222222222@g.us", "chat_name": "Weekly Standup",
+         "is_from_me": 0, "sender": "6590000002", "content": "msg2", "timestamp": ts(1)},
+        {"chat_jid": "6590000003@s.whatsapp.net", "chat_name": "Carol",
+         "is_from_me": 0, "sender": "6590000003", "content": "msg3", "timestamp": ts(1)},
+    ])
+    excluded = ["111111111111111111@g.us", "222222222222222222@g.us"]
+    results = fetch_messages_by_time_window(lookback_hours=24, excluded_chats=excluded)
+    jids = {r["chat_jid"] for r in results}
+    assert "111111111111111111@g.us" not in jids
+    assert "222222222222222222@g.us" not in jids
+    assert "6590000003@s.whatsapp.net" in jids
+
+
+def test_time_window_empty_exclusion_list_returns_all(db_path):
+    seed(db_path, [
+        {"chat_jid": "111111111111111111@g.us", "chat_name": "Project Alpha",
+         "is_from_me": 1, "sender": "6590000001", "content": "msg", "timestamp": ts(1)},
+    ])
+    results = fetch_messages_by_time_window(lookback_hours=24, excluded_chats=[])
+    assert len(results) == 1
+
+
+def test_time_window_exclusion_not_present_has_no_effect(db_path):
+    seed(db_path, [
+        {"chat_jid": "111111111111111111@g.us", "chat_name": "Project Alpha",
+         "is_from_me": 1, "sender": "6590000001", "content": "msg", "timestamp": ts(1)},
+    ])
+    results = fetch_messages_by_time_window(lookback_hours=24, excluded_chats=["999999999999999999@g.us"])
+    assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# fetch_individual_chats_with_last_message — exclusion filtering
+# ---------------------------------------------------------------------------
+
+def test_individual_chats_excluded_dm_is_filtered_out(db_path):
+    seed(db_path, [
+        {"chat_jid": "6590000001@s.whatsapp.net", "chat_name": "Carol",
+         "is_from_me": 0, "sender": "6590000001", "content": "are you free tomorrow?", "timestamp": ts(1)},
+        {"chat_jid": "6590000002@s.whatsapp.net", "chat_name": "Dave",
+         "is_from_me": 0, "sender": "6590000002", "content": "sounds good", "timestamp": ts(1)},
+    ])
+    results = fetch_individual_chats_with_last_message(lookback_hours=24, excluded_chats=["6590000001@s.whatsapp.net"])
+    jids = {r["chat_jid"] for r in results}
+    assert "6590000001@s.whatsapp.net" not in jids
+    assert "6590000002@s.whatsapp.net" in jids
+
+
+def test_individual_chats_no_exclusions_returns_all_dms(db_path):
+    seed(db_path, [
+        {"chat_jid": "6590000001@s.whatsapp.net", "chat_name": "Carol",
+         "is_from_me": 0, "sender": "6590000001", "content": "are you free tomorrow?", "timestamp": ts(1)},
+        {"chat_jid": "6590000002@s.whatsapp.net", "chat_name": "Dave",
+         "is_from_me": 0, "sender": "6590000002", "content": "sounds good", "timestamp": ts(1)},
+    ])
+    results = fetch_individual_chats_with_last_message(lookback_hours=24)
+    jids = {r["chat_jid"] for r in results}
+    assert "6590000001@s.whatsapp.net" in jids
+    assert "6590000002@s.whatsapp.net" in jids

@@ -32,3 +32,4 @@ build/
 
 # User config
 priority_contacts.txt
+excluded_chats.txt
