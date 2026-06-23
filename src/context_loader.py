@@ -41,20 +41,15 @@ def load_chat_context(chat_jid: str) -> str:
     if isinstance(chat_tags, str):
         chat_tags = [chat_tags]
 
-    # print(f"  [context] JID={chat_jid} → tags={chat_tags or 'none'}")
-
     chunks = []
     for tag in chat_tags:
         file_path = tag_files.get(tag)
         if not file_path:
-            # print(f"  [context]   {tag}: no file mapping found")
             continue
         p = Path(file_path)
         if not p.exists():
-            # print(f"  [context]   {tag}: file '{file_path}' not found")
             continue
         content = p.read_text(encoding="utf-8").strip()
-        # print(f"  [context]   {tag} ({file_path}):\n{content}\n")
         chunks.append(content)
 
     return "\n\n".join(chunks)

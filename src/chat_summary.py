@@ -2,15 +2,15 @@
 Chat summary module.
 
 Per active chat: fetch messages (floor of last 10) → one LLM call → summary.
-Routing into sections + the final briefing layout come in later steps; for now
-we render a flat list so the pipeline stays runnable.
+Summaries are sorted by message volume and rendered into a single briefing.
 """
 
+import re
 from datetime import datetime, timedelta, timezone
 
-from src.llm.client import call_model
+from src.llm import call_model
 from src.context_loader import load_personal_context, load_chat_context
-from src.db.reader import (
+from src.db import (
     fetch_active_chats,
     fetch_chat_messages,
     load_excluded_chats,
@@ -38,9 +38,7 @@ def run(lookback_hours: int = 24) -> str:
         summary = _summarise_chat(chat_name, transcript, personal_context, chat_context)
         window_count = sum(1 for m in messages if m["timestamp"] >= cutoff)
         summaries.append({
-            "chat_jid": chat["chat_jid"],
             "chat_name": chat_name,
-            "is_group": chat["is_group"],
             "msg_count": window_count,
             "summary": summary,
         })
@@ -117,17 +115,15 @@ def _clean_summary(text: str) -> str:
     - Converts markdown list bullets (* / - / +) → • so they aren't
       misread as bold/italic delimiters by Telegram's parser.
     """
-    import re
     text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
     text = re.sub(r"^(\s*)[*\-+]\s+", r"\1• ", text, flags=re.MULTILINE)
     return text
 
 
 def render_briefing(summaries: list[dict], now: datetime | None = None) -> str:
-    """Render a flat briefing string.
+    """Render the briefing string from a list of per-chat summaries.
 
     Each entry must have: chat_name (str), msg_count (int), summary (str).
-    Section routing replaces this flat layout in a later step.
     """
     if now is None:
         now = datetime.now(timezone.utc)

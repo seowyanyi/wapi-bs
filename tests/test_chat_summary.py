@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from src.modules.chat_summary import format_transcript, render_briefing
+from src.chat_summary import format_transcript, render_briefing
 
 
 # ---------------------------------------------------------------------------

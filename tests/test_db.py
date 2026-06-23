@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.db.reader import (
+from src.db import (
     _lookback_cutoff,
     fetch_active_chats,
     fetch_chat_messages,
