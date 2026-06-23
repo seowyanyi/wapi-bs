@@ -32,12 +32,14 @@ def fetch_messages_by_time_window(
     cutoff = _lookback_cutoff(lookback_hours)
     query = """
         SELECT
-            m.chat_jid   AS chat_jid,
-            c.name       AS chat_name,
-            m.is_from_me AS is_from_me,
-            m.sender     AS sender,
-            m.content    AS content,
-            m.timestamp  AS timestamp
+            m.chat_jid        AS chat_jid,
+            c.name            AS chat_name,
+            m.is_from_me      AS is_from_me,
+            m.sender          AS sender,
+            m.sender_display  AS sender_display,
+            m.content         AS content,
+            m.content_display AS content_display,
+            m.timestamp       AS timestamp
         FROM messages m
         LEFT JOIN chats c ON c.jid = m.chat_jid
         WHERE datetime(m.timestamp) >= ?
@@ -62,12 +64,14 @@ def fetch_messages_by_contact(
     cutoff = _lookback_cutoff(lookback_hours)
     query = """
         SELECT
-            m.chat_jid   AS chat_jid,
-            c.name       AS chat_name,
-            m.is_from_me AS is_from_me,
-            m.sender     AS sender,
-            m.content    AS content,
-            m.timestamp  AS timestamp
+            m.chat_jid        AS chat_jid,
+            c.name            AS chat_name,
+            m.is_from_me      AS is_from_me,
+            m.sender          AS sender,
+            m.sender_display  AS sender_display,
+            m.content         AS content,
+            m.content_display AS content_display,
+            m.timestamp       AS timestamp
         FROM messages m
         LEFT JOIN chats c ON c.jid = m.chat_jid
         WHERE m.chat_jid = ?
@@ -90,12 +94,14 @@ def fetch_individual_chats_with_last_message(
     cutoff = _lookback_cutoff(lookback_hours)
     query = """
         SELECT
-            m.chat_jid   AS chat_jid,
-            c.name       AS chat_name,
-            m.is_from_me AS is_from_me,
-            m.sender     AS sender,
-            m.content    AS content,
-            m.timestamp  AS timestamp
+            m.chat_jid        AS chat_jid,
+            c.name            AS chat_name,
+            m.is_from_me      AS is_from_me,
+            m.sender          AS sender,
+            m.sender_display  AS sender_display,
+            m.content         AS content,
+            m.content_display AS content_display,
+            m.timestamp       AS timestamp
         FROM messages m
         LEFT JOIN chats c ON c.jid = m.chat_jid
         INNER JOIN (
