@@ -4,6 +4,20 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+# Columns selected for every message row. Kept in one place so the per-chat
+# queries below stay in sync.
+_MESSAGE_COLUMNS = """
+    m.chat_jid        AS chat_jid,
+    c.name            AS chat_name,
+    m.is_from_me      AS is_from_me,
+    m.sender          AS sender,
+    m.sender_display  AS sender_display,
+    m.content         AS content,
+    m.content_display AS content_display,
+    m.timestamp       AS timestamp
+"""
+
+
 def load_excluded_chats(path: str | None = None) -> list[str]:
     """Load chat JIDs to exclude, one per line, from a text file.
 
@@ -20,13 +34,13 @@ def load_excluded_chats(path: str | None = None) -> list[str]:
         return []
 
 
-def fetch_messages_by_time_window(
+def fetch_active_chats(
     lookback_hours: int,
     excluded_chats: list[str] | None = None,
 ) -> list[dict]:
-    """Return all messages within the last `lookback_hours`.
+    """Return chats with at least one message in the last `lookback_hours`.
 
-    Each row is a dict with: chat_jid, chat_name, sender, content, timestamp, is_from_me.
+    Each row: {chat_jid, chat_name, is_group}, most recently active first.
     Chats listed in `excluded_chats` (by JID) are omitted.
     """
     cutoff = _lookback_cutoff(lookback_hours)
@@ -34,93 +48,62 @@ def fetch_messages_by_time_window(
         SELECT
             m.chat_jid        AS chat_jid,
             c.name            AS chat_name,
-            m.is_from_me      AS is_from_me,
-            m.sender          AS sender,
-            m.sender_display  AS sender_display,
-            m.content         AS content,
-            m.content_display AS content_display,
-            m.timestamp       AS timestamp
+            MAX(m.timestamp)  AS last_ts
         FROM messages m
         LEFT JOIN chats c ON c.jid = m.chat_jid
         WHERE datetime(m.timestamp) >= ?
-        ORDER BY m.timestamp ASC
+        GROUP BY m.chat_jid
+        ORDER BY last_ts DESC
     """
     with get_connection() as conn:
         rows = conn.execute(query, (cutoff,)).fetchall()
-    messages = [dict(row) for row in rows]
-    if excluded_chats:
-        messages = [m for m in messages if m["chat_jid"] not in excluded_chats]
-    return messages
+    excluded = set(excluded_chats or [])
+    return [
+        {
+            "chat_jid": row["chat_jid"],
+            "chat_name": row["chat_name"],
+            "is_group": row["chat_jid"].endswith("@g.us"),
+        }
+        for row in rows
+        if row["chat_jid"] not in excluded
+    ]
 
 
-def fetch_messages_by_contact(
-    contact_jid: str,
+def fetch_chat_messages(
+    chat_jid: str,
     lookback_hours: int,
+    min_messages: int = 10,
 ) -> list[dict]:
-    """Return messages for a specific contact within the last `lookback_hours`.
+    """Return messages for one chat, in ascending time order.
 
-    `contact_jid` is the WhatsApp JID, e.g. '6512345678@s.whatsapp.net'.
+    Fetches the greater of (all messages in the window) or (last `min_messages`):
+    if the window holds fewer than `min_messages`, fall back to the most recent
+    `min_messages` regardless of age. This guarantees enough context for chats
+    that only had a message or two in the last day.
     """
     cutoff = _lookback_cutoff(lookback_hours)
-    query = """
-        SELECT
-            m.chat_jid        AS chat_jid,
-            c.name            AS chat_name,
-            m.is_from_me      AS is_from_me,
-            m.sender          AS sender,
-            m.sender_display  AS sender_display,
-            m.content         AS content,
-            m.content_display AS content_display,
-            m.timestamp       AS timestamp
+    window_query = f"""
+        SELECT {_MESSAGE_COLUMNS}
         FROM messages m
         LEFT JOIN chats c ON c.jid = m.chat_jid
         WHERE m.chat_jid = ?
           AND datetime(m.timestamp) >= ?
         ORDER BY m.timestamp ASC
     """
-    with get_connection() as conn:
-        rows = conn.execute(query, (contact_jid, cutoff)).fetchall()
-    return [dict(row) for row in rows]
-
-
-def fetch_individual_chats_with_last_message(
-    lookback_hours: int,
-    excluded_chats: list[str] | None = None,
-) -> list[dict]:
-    """Return one row per individual (non-group) chat, showing only the latest message.
-
-    Filters to chats that had activity within `lookback_hours`.
-    """
-    cutoff = _lookback_cutoff(lookback_hours)
-    query = """
-        SELECT
-            m.chat_jid        AS chat_jid,
-            c.name            AS chat_name,
-            m.is_from_me      AS is_from_me,
-            m.sender          AS sender,
-            m.sender_display  AS sender_display,
-            m.content         AS content,
-            m.content_display AS content_display,
-            m.timestamp       AS timestamp
+    floor_query = f"""
+        SELECT {_MESSAGE_COLUMNS}
         FROM messages m
         LEFT JOIN chats c ON c.jid = m.chat_jid
-        INNER JOIN (
-            SELECT chat_jid, MAX(timestamp) AS max_ts
-            FROM messages
-            WHERE datetime(timestamp) >= ?
-              AND chat_jid NOT LIKE '%@g.us'
-            GROUP BY chat_jid
-        ) latest
-          ON m.chat_jid = latest.chat_jid
-         AND m.timestamp = latest.max_ts
+        WHERE m.chat_jid = ?
         ORDER BY m.timestamp DESC
+        LIMIT ?
     """
     with get_connection() as conn:
-        rows = conn.execute(query, (cutoff,)).fetchall()
-    chats = [dict(row) for row in rows]
-    if excluded_chats:
-        chats = [c for c in chats if c["chat_jid"] not in excluded_chats]
-    return chats
+        rows = conn.execute(window_query, (chat_jid, cutoff)).fetchall()
+        if len(rows) < min_messages:
+            rows = list(reversed(conn.execute(floor_query, (chat_jid, min_messages)).fetchall()))
+    return [dict(row) for row in rows]
+
 
 @contextmanager
 def get_connection(db_path: str | None = None) -> Iterator[sqlite3.Connection]:

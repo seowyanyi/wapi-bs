@@ -7,7 +7,7 @@ load_dotenv()
 
 
 def main():
-    briefing = chat_summary.run(lookback_hours=24)
+    briefing = chat_summary.run(lookback_hours=3)
     print(briefing)
     send_long_message(briefing)
 

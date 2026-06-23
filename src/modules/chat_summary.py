@@ -1,40 +1,48 @@
 """
-Stage 1: active chats → one LLM call per chat → flat list → Telegram.
+Chat summary module.
+
+Per active chat: fetch messages (floor of last 10) → one LLM call → summary.
+Routing into sections + the final briefing layout come in later steps; for now
+we render a flat list so the pipeline stays runnable.
 """
 
 from datetime import datetime, timezone
 
 from src.llm.client import call_model
-from src.db.reader import fetch_messages_by_time_window, load_excluded_chats
+from src.db.reader import (
+    fetch_active_chats,
+    fetch_chat_messages,
+    load_excluded_chats,
+)
+
 
 def run(lookback_hours: int = 24) -> str:
     """Fetch active chats, summarise each via LLM, and return a formatted briefing."""
     excluded_chats = load_excluded_chats()
-    messages = fetch_messages_by_time_window(lookback_hours, excluded_chats)
+    chats = fetch_active_chats(lookback_hours, excluded_chats)
 
-    grouped = group_by_chat(messages)
+    print(f"\nFound {len(chats)} active chats in the last {lookback_hours}h\n")
 
     summaries = []
-    for jid, msgs in grouped.items():
-        chat_name = msgs[0]["chat_name"] or jid
-        print(f"Processing chat {chat_name} with {jid=}")
-        transcript = format_transcript(msgs)
+    for chat in chats:
+        chat_name = chat["chat_name"] or chat["chat_jid"]
+        messages = fetch_chat_messages(chat["chat_jid"], lookback_hours)
+        print(f"--- {chat_name} [{chat['chat_jid']}] ({len(messages)} msgs) ---")
+        transcript = format_transcript(messages)
+        print(transcript)
+        print(f"\n→ Sending to LLM...")
         summary = _summarise_chat(chat_name, transcript)
+        print(f"← Summary: {summary}\n")
         summaries.append({
+            "chat_jid": chat["chat_jid"],
             "chat_name": chat_name,
-            "msg_count": len(msgs),
+            "is_group": chat["is_group"],
+            "msg_count": len(messages),
             "summary": summary,
         })
 
     summaries.sort(key=lambda x: x["msg_count"], reverse=True)
     return render_briefing(summaries)
-
-def group_by_chat(messages: list[dict]) -> dict[str, list[dict]]:
-    """Group a flat message list by chat_jid, preserving insertion order."""
-    grouped: dict[str, list[dict]] = {}
-    for msg in messages:
-        grouped.setdefault(msg["chat_jid"], []).append(msg)
-    return grouped
 
 
 def format_transcript(messages: list[dict]) -> str:
@@ -49,17 +57,16 @@ def format_transcript(messages: list[dict]) -> str:
 
 
 def _summarise_chat(chat_name: str, transcript: str) -> str:
-    """Call LLM to produce a one-line summary of a single chat.
-
-    Fill in the prompt below, then run a real API call to verify before wiring tests.
-    """
-    # print(f"Summarising chat {chat_name} with {len(transcript)} chars of transcript...")
-    # print("\n\n")
-    # print(transcript)
-    system = "You are Yan Yi's personal daily intelligence briefing assistant. Your job is to process his WhatsApp messages from the past 24 hours and produce a structured, actionable briefing he can read in under 3 minutes on Telegram. You will be given a transcript of messages from a single chat. Your task is to summarise the key points, decisions, and action items in a concise manner. The summary should be no more than 3 sentences long, and should be written in a clear, professional tone. Avoid including any irrelevant information or personal opinions. Focus on what is important for Yan Yi to know and act upon. Do not include a title or heading that identifies the chat name — go straight into the content. You may use bold labels for sections like Key Points or Action Items."
-    
-    user_prompt = f"Here is the transcript of messages from the chat named '{chat_name}':\n\n{transcript}\n\n"
-    return call_model(user_prompt, system=system)
+    """Summarise one chat via the LLM, returning a free-form summary string."""
+    system = (
+        "You are Yan Yi's personal daily WhatsApp intelligence briefing assistant. "
+        "You will be given the recent message transcript of a single chat. Produce a "
+        "concise summary (no more than 3 sentences) of the key points, decisions, and "
+        "action items. Write in a clear, professional tone. Do not include a title or "
+        "the chat name — go straight into the content."
+    )
+    user_prompt = f"Transcript of the chat named '{chat_name}':\n\n{transcript}\n"
+    return call_model(user_prompt, system=system).strip()
 
 
 def _clean_summary(text: str) -> str:
@@ -68,7 +75,6 @@ def _clean_summary(text: str) -> str:
     - Converts **bold** → *bold* (Telegram Markdown uses single asterisks).
     """
     import re
-    # ** → * for Telegram bold
     text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
     return text
 
@@ -76,7 +82,8 @@ def _clean_summary(text: str) -> str:
 def render_briefing(summaries: list[dict], now: datetime | None = None) -> str:
     """Render a flat briefing string.
 
-    Each entry in `summaries` must have: chat_name (str), msg_count (int), summary (str).
+    Each entry must have: chat_name (str), msg_count (int), summary (str).
+    Section routing replaces this flat layout in a later step.
     """
     if now is None:
         now = datetime.now(timezone.utc)

@@ -1,46 +1,6 @@
 from datetime import datetime, timezone
 
-from src.modules.chat_summary import group_by_chat, format_transcript, render_briefing
-
-
-# ---------------------------------------------------------------------------
-# group_by_chat
-# ---------------------------------------------------------------------------
-
-def test_group_by_chat_single_chat():
-    msgs = [
-        {"chat_jid": "alice@s.whatsapp.net", "content": "hi"},
-        {"chat_jid": "alice@s.whatsapp.net", "content": "how are you"},
-    ]
-    grouped = group_by_chat(msgs)
-    assert list(grouped.keys()) == ["alice@s.whatsapp.net"]
-    assert len(grouped["alice@s.whatsapp.net"]) == 2
-
-
-def test_group_by_chat_multiple_chats():
-    msgs = [
-        {"chat_jid": "alice@s.whatsapp.net", "content": "hi"},
-        {"chat_jid": "group@g.us", "content": "meeting at 3"},
-        {"chat_jid": "alice@s.whatsapp.net", "content": "you there?"},
-    ]
-    grouped = group_by_chat(msgs)
-    assert set(grouped.keys()) == {"alice@s.whatsapp.net", "group@g.us"}
-    assert len(grouped["alice@s.whatsapp.net"]) == 2
-    assert len(grouped["group@g.us"]) == 1
-
-
-def test_group_by_chat_preserves_order():
-    msgs = [
-        {"chat_jid": "b@s.whatsapp.net", "content": "first"},
-        {"chat_jid": "a@s.whatsapp.net", "content": "second"},
-        {"chat_jid": "c@s.whatsapp.net", "content": "third"},
-    ]
-    grouped = group_by_chat(msgs)
-    assert list(grouped.keys()) == ["b@s.whatsapp.net", "a@s.whatsapp.net", "c@s.whatsapp.net"]
-
-
-def test_group_by_chat_empty():
-    assert group_by_chat([]) == {}
+from src.modules.chat_summary import format_transcript, render_briefing
 
 
 # ---------------------------------------------------------------------------
