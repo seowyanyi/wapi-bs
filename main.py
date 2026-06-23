@@ -1,3 +1,5 @@
+import time
+import os
 from dotenv import load_dotenv
 
 from src.modules import chat_summary
@@ -7,7 +9,16 @@ load_dotenv()
 
 
 def main():
-    briefing = chat_summary.run(lookback_hours=3)
+    provider = os.getenv("LLM_PROVIDER", "anthropic")
+    if provider == "local":
+        model = os.getenv("OLLAMA_MODEL")
+    else:
+        model = os.getenv("ANTHROPIC_MODEL")
+
+    start = time.perf_counter()
+    briefing = chat_summary.run(lookback_hours=1.5)
+    elapsed = time.perf_counter() - start
+    print(f"{model}: [chat_summary] completed in {elapsed:.2f}s")
     print(briefing)
     send_long_message(briefing)
 
