@@ -94,9 +94,10 @@ def _summarise_chat(
 
     Produce a concise summary (no more than 3 sentences) of the key points, decisions, and action items from the NEW SINCE YESTERDAY section only. Use EARLIER CONTEXT solely to interpret the new messages.
 
-    Write in a clear, professional tone.
+    Write in a clear, concise manner. Use bullet points for readability.
 
     Do not include a title or the chat name — go straight into the content.
+    Do not include any preamble, introductory sentences, or meta-commentary about what you are doing. No phrases like "Here's a summary of...", "The following are...", or similar. Output only the summary content itself, starting immediately with the first point.    
     """.strip()
 
     if personal_context:
@@ -113,9 +114,12 @@ def _clean_summary(text: str) -> str:
     """Sanitize LLM output for Telegram Markdown rendering.
 
     - Converts **bold** → *bold* (Telegram Markdown uses single asterisks).
+    - Converts markdown list bullets (* / - / +) → • so they aren't
+      misread as bold/italic delimiters by Telegram's parser.
     """
     import re
     text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
+    text = re.sub(r"^(\s*)[*\-+]\s+", r"\1• ", text, flags=re.MULTILINE)
     return text
 
 
