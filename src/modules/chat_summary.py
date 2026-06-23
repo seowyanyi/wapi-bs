@@ -33,10 +33,8 @@ def run(lookback_hours: int = 24) -> str:
         chat_name = chat["chat_name"] or chat["chat_jid"]
         messages = fetch_chat_messages(chat["chat_jid"], lookback_hours)
         print(f"--- {chat_name} [{chat['chat_jid']}] ({len(messages)} fetched) ---")
-        transcript = format_transcript(messages)
+        transcript = format_transcript(messages, cutoff)
         chat_context = load_chat_context(chat["chat_jid"])
-        if chat_context:
-            print(f"[chat context loaded]")
         summary = _summarise_chat(chat_name, transcript, personal_context, chat_context)
         window_count = sum(1 for m in messages if m["timestamp"] >= cutoff)
         summaries.append({
@@ -51,15 +49,33 @@ def run(lookback_hours: int = 24) -> str:
     return render_briefing(summaries)
 
 
-def format_transcript(messages: list[dict]) -> str:
-    """Format a list of messages as a readable transcript for the LLM."""
-    lines = []
-    for m in messages:
-        sender = "Me" if m["is_from_me"] else (m["sender_display"] or m["sender"] or "Unknown")
-        ts = m["timestamp"][:16]  # "YYYY-MM-DD HH:MM"
-        content = m["content_display"] or m["content"] or "[media]"
-        lines.append(f"[{ts}] {sender}: {content}")
-    return "\n".join(lines)
+def format_transcript(messages: list[dict], cutoff: str | None = None) -> str:
+    """Format messages as a readable transcript for the LLM.
+
+    When `cutoff` is provided, the transcript is split into two labelled
+    sections so the LLM knows which messages are new vs. background context.
+    """
+    if cutoff:
+        context_msgs = [m for m in messages if m["timestamp"] < cutoff]
+        new_msgs = [m for m in messages if m["timestamp"] >= cutoff]
+        lines = []
+        if context_msgs:
+            lines.append("## EARLIER CONTEXT (use as background context only — do not treat this as new updates for today.)")
+            lines.extend(_format_message(m) for m in context_msgs)
+        lines.append("\n## NEW SINCE YESTERDAY (Focus only on this section to summarise.)")
+        if new_msgs:
+            lines.extend(_format_message(m) for m in new_msgs)
+        else:
+            lines.append("(no new messages)")
+        return "\n".join(lines)
+    return "\n".join(_format_message(m) for m in messages)
+
+
+def _format_message(m: dict) -> str:
+    sender = "Me" if m["is_from_me"] else (m["sender_display"] or m["sender"] or "Unknown")
+    ts = m["timestamp"][:16]  # "YYYY-MM-DD HH:MM"
+    content = m["content_display"] or m["content"] or "[media]"
+    return f"[{ts}] {sender}: {content}"
 
 
 def _summarise_chat(
@@ -72,9 +88,11 @@ def _summarise_chat(
     system = """
     You are Yan Yi's personal daily WhatsApp intelligence briefing assistant.
 
-    You will be given the recent message transcript of a single chat. The most recent messages are the most important, but consider the whole transcript for context.
+    The transcript is split into two sections:
+    - EARLIER CONTEXT: older messages provided as background. Read them to understand the conversation, but do not report on them.
+    - NEW SINCE YESTERDAY: the messages to summarise.
 
-    Produce a concise summary (no more than 3 sentences) of the key points, decisions, and action items.
+    Produce a concise summary (no more than 3 sentences) of the key points, decisions, and action items from the NEW SINCE YESTERDAY section only. Use EARLIER CONTEXT solely to interpret the new messages.
 
     Write in a clear, professional tone.
 

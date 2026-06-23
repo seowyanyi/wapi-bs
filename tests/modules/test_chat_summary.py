@@ -56,6 +56,39 @@ def test_format_transcript_multiple_messages():
     assert "Me" in lines[1]
 
 
+def test_format_transcript_with_cutoff_splits_sections():
+    cutoff = "2026-06-22 10:00:00"
+    msgs = [
+        _msg("old message", timestamp="2026-06-22 09:00:00"),
+        _msg("new message", timestamp="2026-06-22 11:00:00"),
+    ]
+    result = format_transcript(msgs, cutoff=cutoff)
+    assert "EARLIER CONTEXT" in result
+    assert "NEW SINCE YESTERDAY" in result
+    ctx_pos = result.index("EARLIER CONTEXT")
+    new_pos = result.index("NEW SINCE YESTERDAY")
+    old_pos = result.index("old message")
+    new_msg_pos = result.index("new message")
+    assert ctx_pos < old_pos < new_pos < new_msg_pos
+
+
+def test_format_transcript_with_cutoff_no_context():
+    cutoff = "2026-06-22 08:00:00"
+    msgs = [_msg("new message", timestamp="2026-06-22 11:00:00")]
+    result = format_transcript(msgs, cutoff=cutoff)
+    assert "EARLIER CONTEXT" not in result
+    assert "NEW SINCE YESTERDAY" in result
+    assert "new message" in result
+
+
+def test_format_transcript_with_cutoff_no_new_messages():
+    cutoff = "2026-06-22 12:00:00"
+    msgs = [_msg("old message", timestamp="2026-06-22 09:00:00")]
+    result = format_transcript(msgs, cutoff=cutoff)
+    assert "EARLIER CONTEXT" in result
+    assert "no new messages" in result
+
+
 # ---------------------------------------------------------------------------
 # render_briefing
 # ---------------------------------------------------------------------------
