@@ -6,9 +6,10 @@ Routing into sections + the final briefing layout come in later steps; for now
 we render a flat list so the pipeline stays runnable.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.llm.client import call_model
+from src.context_loader import load_personal_context, load_chat_context
 from src.db.reader import (
     fetch_active_chats,
     fetch_chat_messages,
@@ -20,24 +21,29 @@ def run(lookback_hours: int = 24) -> str:
     """Fetch active chats, summarise each via LLM, and return a formatted briefing."""
     excluded_chats = load_excluded_chats()
     chats = fetch_active_chats(lookback_hours, excluded_chats)
+    personal_context = load_personal_context()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).strftime("%Y-%m-%d %H:%M:%S")
 
     print(f"\nFound {len(chats)} active chats in the last {lookback_hours}h\n")
+    if personal_context:
+        print("Personal context loaded.\n")
 
     summaries = []
     for chat in chats:
         chat_name = chat["chat_name"] or chat["chat_jid"]
         messages = fetch_chat_messages(chat["chat_jid"], lookback_hours)
-        print(f"--- {chat_name} [{chat['chat_jid']}] ({len(messages)} msgs) ---")
+        print(f"--- {chat_name} [{chat['chat_jid']}] ({len(messages)} fetched) ---")
         transcript = format_transcript(messages)
-        print(transcript)
-        print(f"\n→ Sending to LLM...")
-        summary = _summarise_chat(chat_name, transcript)
-        print(f"← Summary: {summary}\n")
+        chat_context = load_chat_context(chat["chat_jid"])
+        if chat_context:
+            print(f"[chat context loaded]")
+        summary = _summarise_chat(chat_name, transcript, personal_context, chat_context)
+        window_count = sum(1 for m in messages if m["timestamp"] >= cutoff)
         summaries.append({
             "chat_jid": chat["chat_jid"],
             "chat_name": chat_name,
             "is_group": chat["is_group"],
-            "msg_count": len(messages),
+            "msg_count": window_count,
             "summary": summary,
         })
 
@@ -56,16 +62,32 @@ def format_transcript(messages: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _summarise_chat(chat_name: str, transcript: str) -> str:
+def _summarise_chat(
+    chat_name: str,
+    transcript: str,
+    personal_context: str = "",
+    chat_context: str = "",
+) -> str:
     """Summarise one chat via the LLM, returning a free-form summary string."""
-    system = (
-        "You are Yan Yi's personal daily WhatsApp intelligence briefing assistant. "
-        "You will be given the recent message transcript of a single chat. Produce a "
-        "concise summary (no more than 3 sentences) of the key points, decisions, and "
-        "action items. Write in a clear, professional tone. Do not include a title or "
-        "the chat name — go straight into the content."
-    )
+    system = """
+    You are Yan Yi's personal daily WhatsApp intelligence briefing assistant.
+
+    You will be given the recent message transcript of a single chat. The most recent messages are the most important, but consider the whole transcript for context.
+
+    Produce a concise summary (no more than 3 sentences) of the key points, decisions, and action items.
+
+    Write in a clear, professional tone.
+
+    Do not include a title or the chat name — go straight into the content.
+    """.strip()
+
+    if personal_context:
+        system += f"\n\n## About Yan Yi\n{personal_context}"
+
     user_prompt = f"Transcript of the chat named '{chat_name}':\n\n{transcript}\n"
+    if chat_context:
+        user_prompt += f"\n## Context about this chat\n{chat_context}\n"
+
     return call_model(user_prompt, system=system).strip()
 
 

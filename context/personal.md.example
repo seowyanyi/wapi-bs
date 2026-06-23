@@ -1,0 +1,20 @@
+# Personal context
+
+Copy this file to `personal.md` (gitignored) and fill in your details.
+The LLM reads this on every run to better personalise summaries.
+
+---
+
+I am [your name], a [role] based in [city].
+
+## Relationships
+- [Name]: [relationship, e.g. "my wife", "my manager at Acme", "university friend"]
+- [Name]: [relationship]
+
+## What I care about
+- [Topic, e.g. "career moves and job offers in my network"]
+- [Topic, e.g. "anything time-sensitive that needs my reply today"]
+- [Topic, e.g. "family health updates"]
+
+## Other notes for the assistant
+- [Any standing instruction, e.g. "flag messages from X as high priority"]

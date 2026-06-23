@@ -1,0 +1,12 @@
+# Tag definitions — map each tag name to its context file.
+# Context files are loaded and injected into the LLM prompt for any chat with that tag.
+[tags]
+LYM = "context/lym.md"
+PT  = "context/production.md"
+
+# Chat assignments — keyed by chat JID (stable, unlike group names).
+# Find a chat's JID in the run output: "--- Chat Name [jid@here] ---"
+[chats]
+"1234567890-1234567890@g.us" = ["LYM", "PT"]   # multiple tags → both context files included
+"0987654321-0987654321@g.us" = ["PT"]
+"6512345678@s.whatsapp.net"  = ["LYM"]          # individual contact

@@ -33,3 +33,9 @@ build/
 # User config
 priority_contacts.txt
 excluded_chats.txt
+
+# Private context (not for git — copy the .example files to use)
+context/personal.md
+context/chats.toml
+context/*.md
+!context/*.example
