@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for WAPI-BS daily briefing.
+
+  Fires at 21:00 (9pm) every day. If the Mac was asleep or off at that time,
+  launchd will fire the job on the next wake — the wrapper script guards
+  against double-runs within the same evening.
+
+  INSTALL (one-time):
+    cp scripts/com.yanyi.wapi-bs.plist ~/Library/LaunchAgents/
+    chmod 644 ~/Library/LaunchAgents/com.yanyi.wapi-bs.plist
+    chmod +x scripts/run_briefing.sh
+    launchctl load ~/Library/LaunchAgents/com.yanyi.wapi-bs.plist
+
+  CHECK STATUS:
+    launchctl list | grep wapi
+
+  VIEW LOGS:
+    tail -f ~/Library/Logs/wapi-bs/briefing.log
+
+  UNINSTALL:
+    launchctl unload ~/Library/LaunchAgents/com.yanyi.wapi-bs.plist
+    rm ~/Library/LaunchAgents/com.yanyi.wapi-bs.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yanyi.wapi-bs</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/seowyanyi/AI-Projects/WAPI-BS/scripts/run_briefing.sh</string>
+  </array>
+
+  <!-- Fire at 9pm. launchd catches up on next wake if missed. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>21</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- launchd-level stdout/stderr (wrapper also writes to briefing.log) -->
+  <key>StandardOutPath</key>
+  <string>/Users/seowyanyi/Library/Logs/wapi-bs/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/seowyanyi/Library/Logs/wapi-bs/launchd.log</string>
+
+  <!-- Do not run immediately on load -->
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
